@@ -4,6 +4,8 @@
 
 ![License: GPL v3](https://img.shields.io/badge/license-GPLv3-blue.svg)
 
+Поддержать меня можно на Boosty: https://boosty.to/triangle_black/
+
 ![screenshot](promo.png)
 
 **Flutter / Android**-компаньон к [Notes Desktop](https://github.com/HelpFreedom/note-desktop) — приложению
