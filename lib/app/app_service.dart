@@ -306,9 +306,25 @@ class AppService extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Записать адрес пира для прямого подключения. Регулярно зовут и движок (из живой
+  /// сессии), и обнаружение, поэтому неизменившийся адрес файл не переписывает.
   Future<void> _savePeerAddr(String deviceId, String host, int port) async {
-    _peerAddrs[deviceId] = {'host': host, 'port': port};
+    final next = mergePeerAddr(_peerAddrs[deviceId], host, port);
+    if (next == null) return;
+    _peerAddrs[deviceId] = next;
     await _peerAddrsFile.writeAsString(jsonEncode(_peerAddrs));
+  }
+
+  /// Адрес пира из живой сессии (зовётся из цикла чтения движка — не блокируем его).
+  void _onPeerAddr(String deviceId, String host, int port) {
+    unawaited(_learnPeerAddr(deviceId, host, port));
+  }
+
+  /// Освежить сохранённый адрес из установленного соединения: IP мог смениться
+  /// (ПК переподключился к точке доступа), а порт прослушивания пир сообщает в hello.
+  Future<void> _learnPeerAddr(String deviceId, String host, int port) async {
+    if (!await peers.isTrusted(deviceId)) return;
+    await _savePeerAddr(deviceId, host, port);
   }
 
   String _deviceName() => 'Телефон';
@@ -438,7 +454,9 @@ class AppService extends ChangeNotifier {
     await oplog.compact(); // B1: подрезать историю до старта синка с пирами
     final store = SyncStore(oplog, ApplyEngine(vault, oplog), vault);
     _engine = SyncEngine(identity, store,
-        getPeers: () => peers.list(), onChanged: _onRemoteChanged);
+        getPeers: () => peers.list(),
+        onChanged: _onRemoteChanged,
+        onPeerAddr: _onPeerAddr);
     oplog.changeListener = () {
       _engine?.pushAll();
     };
@@ -511,6 +529,9 @@ class AppService extends ChangeNotifier {
     debugPrint('SYNC mDNS found ${p.deviceId} @ ${p.host}:${p.port} '
         'trusted=${await peers.isTrusted(p.deviceId)}');
     if (!await peers.isTrusted(p.deviceId)) return;
+    // mDNS отдаёт живой адрес — запоминаем и его, чтобы прямое подключение
+    // переживало смену IP пира (в т.ч. когда mDNS потом недоступен)
+    await _savePeerAddr(p.deviceId, p.host, p.port);
     if (_engine!.sessions.containsKey(p.deviceId)) return;
     // одно соединение на пару: инициирует устройство с меньшим device_id
     if (identity.deviceId.compareTo(p.deviceId) < 0) {

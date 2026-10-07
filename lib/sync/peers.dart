@@ -73,3 +73,23 @@ class PeerStore {
     await _save((await list()).where((p) => p.deviceId != deviceId).toList());
   }
 }
+
+/// Адрес пира для прямого подключения: `{'host': String, 'port': int}`.
+///
+/// Пиры зовут это регулярно (живая сессия, mDNS), поэтому возвращаем **null**, когда
+/// писать нечего: адрес непригоден или уже совпадает с сохранённым.
+///
+/// [port] = 0 означает «пир не сообщил свой порт» (старая версия на той стороне) —
+/// тогда держим уже сохранённый: хост мог смениться, а порт прослушивания у пира
+/// стабильный. Без порта адрес бесполезен, и запись не создаём.
+Map<String, dynamic>? mergePeerAddr(
+    Map<String, dynamic>? current, String host, int port) {
+  if (host.isEmpty) return null;
+  final known = (current?['port'] as num?)?.toInt() ?? 0;
+  final effective = port > 0 ? port : known;
+  if (effective <= 0) return null;
+  if (current != null && current['host'] == host && known == effective) {
+    return null; // не изменился — файл не переписываем
+  }
+  return {'host': host, 'port': effective};
+}

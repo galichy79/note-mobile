@@ -34,6 +34,17 @@ class Session {
 
   Session(this.engine, this.socket, this.peerId) : reader = ByteReader(socket);
 
+  /// IP пира, каким он виден с нашей стороны ('' — если сокет уже закрылся).
+  /// Для входящего соединения это адрес, по которому пир к нам пришёл, — даже если
+  /// мы сами его не находили и в списке адресов он устарел.
+  String get peerHost {
+    try {
+      return socket.remoteAddress.address;
+    } catch (_) {
+      return '';
+    }
+  }
+
   Future<void> _locked(Future<void> Function() action) {
     final next = _writeChain.then((_) => action());
     _writeChain = next.catchError((_) {}); // цепочка не должна рваться на ошибке
@@ -52,6 +63,10 @@ class Session {
         'device_id': engine.identity.deviceId,
         'name': engine.identity.name,
         'proto': 1,
+        // Свой порт прослушивания: пир запомнит его как адрес для повторного
+        // подключения — в том числе когда соединение инициировал он сам и порт
+        // нам иначе не узнать (у входящего соединения исходный порт эфемерный).
+        'port': engine.port ?? 0,
       });
       await _send({'type': 'have', 'vv': await engine.store.versionVector()});
       while (!_closed) {
@@ -79,6 +94,8 @@ class Session {
           close();
           return;
         }
+        // Адрес пира, каким он виден нам: IP из сокета + порт прослушивания из hello.
+        engine._learnPeerAddr(peerId, peerHost, (msg['port'] as num?)?.toInt() ?? 0);
         if (msg['proto'] != kProtoVersion) {
           // A2: версии протокола различаются. НЕ закрываем — throw на неизвестный kind
           // (apply.dart) гарантирует, что непонятая op переиграется после апгрейда, а не
@@ -170,6 +187,10 @@ class SyncEngine {
   final SyncStore store;
   final Future<List<Peer>> Function() getPeers;
   final void Function()? onChanged;
+  /// Адрес пира, выученный из живой сессии: [host] — его IP, как он виден нам,
+  /// [port] — порт прослушивания из hello (0 — пир его не сообщил). Нужен, чтобы
+  /// сохранённый адрес для прямого подключения не устаревал после смены IP.
+  final void Function(String deviceId, String host, int port)? onPeerAddr;
   final Map<String, Session> sessions = {};
   SecureServerSocket? _server;
   // E2 (паритет с десктопом): слоты «сейчас дозваниваемся» — резервируются СИНХРОННо в
@@ -179,11 +200,22 @@ class SyncEngine {
   final Map<String, int> _lastAttemptMs = {};
   static const int _reconnectCooldownMs = 3000;
 
-  SyncEngine(this.identity, this.store, {required this.getPeers, this.onChanged});
+  SyncEngine(this.identity, this.store,
+      {required this.getPeers, this.onChanged, this.onPeerAddr});
 
   int? get port => _server?.port;
 
   void notifyChanged() => onChanged?.call();
+
+  /// Отдать наружу адрес пира из живой сессии. Ошибка получателя не должна рвать
+  /// сессию (колбэк идёт из цикла чтения) — глушим её здесь.
+  void _learnPeerAddr(String peerId, String host, int port) {
+    final cb = onPeerAddr;
+    if (cb == null) return;
+    try {
+      cb(peerId, host, port);
+    } catch (_) {}
+  }
 
   void _removeSession(Session s) {
     if (sessions[s.peerId] == s) {
