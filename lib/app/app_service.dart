@@ -474,22 +474,36 @@ class AppService extends ChangeNotifier {
       _syncPort = bound;
       await _saveSettings();
     }
-    debugPrint('SYNC start: port=${_engine!.port} '
-        'peerAddrs=${_peerAddrs.length} peers=${(await peers.list()).length}');
-    _discovery = Discovery(identity, _engine!.port!,
-        onFound: (p) => _onPeerFound(p), onLost: (id) => _onPeerLost(id));
-    try {
-      await _discovery!.start();
-    } catch (e) {
-      debugPrint('SYNC mDNS start failed: $e');
-      _discovery = null;
-    }
+    debugPrint('SYNC start: port=${_engine!.port} peerAddrs=$_peerAddrs '
+        'trusted=${(await peers.list()).map((p) => p.deviceId).toList()}');
+    // mDNS — вспомогательный путь, и он НЕ должен держать прямой дозвон: на A07 в режиме
+    // точки доступа nsd.register/startDiscovery не ответил вовсе, из-за чего движок
+    // поднимался, а дозвон по сохранённому адресу не начинался никогда. Поэтому mDNS
+    // уходит в фон и с таймаутом, а прямой путь идёт сразу за ним.
+    unawaited(_startDiscovery());
     _updateStatus();
     // прямое подключение к известным пирам (из QR) + периодическое переподключение
     await _connectKnownPeers();
     _reconnectTimer?.cancel();
     _reconnectTimer =
         Timer.periodic(const Duration(seconds: 20), (_) => _connectKnownPeers());
+  }
+
+  /// Поднять mDNS-обнаружение фоном. Ошибка или зависание nsd не должны мешать
+  /// прямому дозвону — это и есть основной путь там, где mDNS не работает.
+  Future<void> _startDiscovery() async {
+    final eng = _engine;
+    final port = eng?.port;
+    if (eng == null || port == null) return;
+    final d = Discovery(identity, port,
+        onFound: (p) => _onPeerFound(p), onLost: (id) => _onPeerLost(id));
+    _discovery = d;
+    try {
+      await d.start().timeout(const Duration(seconds: 5));
+    } catch (e) {
+      debugPrint('SYNC mDNS start failed: $e');
+      if (identical(_discovery, d)) _discovery = null;
+    }
   }
 
   Future<void> _connectKnownPeers() async {
