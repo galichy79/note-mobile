@@ -25,6 +25,18 @@ android {
         versionName = flutter.versionName
     }
 
+    // Только arm64 в APK. `--target-platform android-arm64` фильтрует движок Flutter, но не
+    // .so плагинов: ML Kit (libbarhopper_v3.so из mobile_scanner), libdartjni и
+    // libimage_processing_util_jni кладутся под все архитектуры — ~8 МБ мёртвого груза.
+    // `ndk { abiFilters }` в AGP 9 на эти библиотеки не действует (проверено: и в
+    // defaultConfig, и в buildTypes.release — APK не менялся), поэтому режем на упаковке.
+    // Нужен x86_64-эмулятор — убрать excludes (или сделать их только для release).
+    packaging {
+        jniLibs {
+            excludes += listOf("lib/x86_64/**", "lib/armeabi-v7a/**", "lib/x86/**")
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
