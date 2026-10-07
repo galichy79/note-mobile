@@ -75,6 +75,18 @@ String fingerprintFromCertPem(String certPem) =>
 String deviceIdFromCertPem(String certPem) =>
     fingerprintFromCertPem(certPem).substring(0, 16);
 
+/// Имя устройства для синка: «Телефон <модель>». Без модели два телефона в списке пиров
+/// на десктопе назывались бы одинаково — «Телефон» — и различить их можно было бы только
+/// по device_id.
+///
+/// В cert имя НЕ входит (сертификат создаётся один раз при первом запуске и больше не
+/// перевыпускается), оно передаётся как есть в hello/discovery/сопряжении. Поэтому смена
+/// имени не меняет device_id и не требует повторного сопряжения.
+String deviceNameFromModel(String? model) {
+  final m = (model ?? '').trim();
+  return m.isEmpty ? 'Телефон' : 'Телефон $m';
+}
+
 /// sha256(DER) от уже разобранного X509 (для cert пира из TLS — у него есть .der).
 String fingerprintFromDer(List<int> der) => sha256.convert(der).toString();
 

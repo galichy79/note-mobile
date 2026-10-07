@@ -5,9 +5,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:ui' show Color;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../crypto/crypto_fs.dart' as cfs;
 import '../crypto/duress.dart';
@@ -47,6 +47,9 @@ class AppService extends ChangeNotifier {
   /// запусками: иначе сохранённый у десктопа адрес устаревал бы на каждом старте
   /// приложения (а по нему десктоп дозванивается и перебирает подсеть). 0 — любой.
   int _syncPort = 0;
+  /// Канал к Android (тот же, что у Keystore-бэкенда) — оттуда берём модель устройства.
+  static const MethodChannel _keystoreChannel = MethodChannel('qtnotes/keystore');
+  String? _deviceModel;
   String syncStatus = 'Синхронизация выключена';
   // известные адреса пиров (из QR) для прямого подключения в обход mDNS
   Map<String, Map<String, dynamic>> _peerAddrs = {};
@@ -91,13 +94,13 @@ class AppService extends ChangeNotifier {
   /// недоступен: device_id берётся из cert, ключ — позже).
   Future<void> _refreshIdentityKey() async {
     if (_identity != null && _identity!.keyAvailable) return;
-    _identity = await ensureIdentity(_deviceDir, _deviceName());
+    _identity = await ensureIdentity(_deviceDir, await _deviceName());
   }
 
   Future<void> init() async {
     vault = Vault(root, blobCacheRoot: cacheRoot);
     peers = PeerStore(File('${root.path}/peers.json'));
-    _identity = await ensureIdentity(_deviceDir, _deviceName());
+    _identity = await ensureIdentity(_deviceDir, await _deviceName());
     oplog = OpLog(File('${root.path}/sync.json'), localId: _identity!.deviceId);
     repo = Repository(vault, oplog);
     await _loadSettings();
@@ -331,7 +334,20 @@ class AppService extends ChangeNotifier {
     await _savePeerAddr(deviceId, host, port);
   }
 
-  String _deviceName() => 'Телефон';
+  /// Имя устройства для синка: «Телефон <модель>» (см. deviceNameFromModel). Модель
+  /// спрашиваем у Android один раз и запоминаем; не вышло — остаётся просто «Телефон».
+  Future<String> _deviceName() async {
+    if (_deviceModel == null) {
+      try {
+        _deviceModel =
+            await _keystoreChannel.invokeMethod<String>('deviceModel') ?? '';
+      } catch (e) {
+        debugPrint('не удалось узнать модель устройства: $e');
+        _deviceModel = '';
+      }
+    }
+    return deviceNameFromModel(_deviceModel);
+  }
 
   // --- настройки ---
 

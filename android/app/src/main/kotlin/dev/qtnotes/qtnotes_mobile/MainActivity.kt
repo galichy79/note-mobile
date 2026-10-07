@@ -102,6 +102,9 @@ class MainActivity : FlutterFragmentActivity() {
                                 result.success(true)
                             }
                             "canDeviceAuth" -> result.success(canDeviceAuth())
+                            // Модель телефона — для имени устройства в синке (чтобы два
+                            // телефона не назывались одинаково). Cert/device_id не трогает.
+                            "deviceModel" -> result.success(Build.MODEL)
                             "copySensitive" -> {
                                 copySensitive(call.argument<String>("text") ?: "")
                                 result.success(true)

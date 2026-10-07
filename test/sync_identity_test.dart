@@ -43,4 +43,23 @@ void main() {
     await store.remove('aabbccddeeff0011');
     expect(await store.isTrusted('aabbccddeeff0011'), isFalse);
   });
+
+  test('имя устройства по модели (без модели — прежнее «Телефон»)', () {
+    expect(deviceNameFromModel('SM-G970F'), 'Телефон SM-G970F');
+    expect(deviceNameFromModel('SM-A075F'), 'Телефон SM-A075F');
+    expect(deviceNameFromModel(''), 'Телефон');
+    expect(deviceNameFromModel(null), 'Телефон');
+    expect(deviceNameFromModel('  '), 'Телефон'); // пустая модель — тоже прежнее имя
+  });
+
+  // Имя — не часть cert: оно передаётся в hello/discovery как есть. Это и позволяет
+  // назвать устройства по модели, не перепаривая их (device_id не меняется).
+  test('смена имени не трогает device_id и cert', () async {
+    final dir = Directory('${tmp.path}/device');
+    final a = await ensureIdentity(dir, 'Телефон');
+    final b = await ensureIdentity(dir, 'Телефон SM-G970F');
+    expect(b.deviceId, a.deviceId, reason: 'device_id обязан остаться прежним');
+    expect(b.name, 'Телефон SM-G970F', reason: 'имя берётся из аргумента, а не из cert');
+    expect(b.certPem, a.certPem, reason: 'cert не перевыпускается');
+  });
 }
