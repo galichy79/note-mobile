@@ -235,7 +235,14 @@ class SyncEngine {
   }
 
   Future<void> serve({String host = '0.0.0.0', int port = 0}) async {
-    _server = await tp.startServer(identity, await _trustedPems(), host: host, port: port);
+    final pems = await _trustedPems();
+    try {
+      _server = await tp.startServer(identity, pems, host: host, port: port);
+    } on SocketException {
+      if (port == 0) rethrow; // любой свободный и так не дался — это не «порт занят»
+      // сохранённый порт занят (как на десктопе) — берём любой свободный
+      _server = await tp.startServer(identity, pems, host: host, port: 0);
+    }
     _server!.listen(_onIncoming, onError: (Object _) {});
   }
 

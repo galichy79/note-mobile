@@ -43,6 +43,10 @@ class AppService extends ChangeNotifier {
   SyncEngine? _engine;
   Discovery? _discovery;
   bool _syncEnabled = false;
+  /// Порт движка синхронизации, закреплённый за этим устройством. Стабильный между
+  /// запусками: иначе сохранённый у десктопа адрес устаревал бы на каждом старте
+  /// приложения (а по нему десктоп дозванивается и перебирает подсеть). 0 — любой.
+  int _syncPort = 0;
   String syncStatus = 'Синхронизация выключена';
   // известные адреса пиров (из QR) для прямого подключения в обход mDNS
   Map<String, Map<String, dynamic>> _peerAddrs = {};
@@ -336,13 +340,15 @@ class AppService extends ChangeNotifier {
       if (await _settingsFile.exists()) {
         final d = (jsonDecode(await _settingsFile.readAsString()) as Map);
         _syncEnabled = (d['sync_enabled'] ?? false) as bool;
+        _syncPort = (d['sync_port'] as num?)?.toInt() ?? 0;
       }
     } catch (_) {}
     repo.syncEnabled = _syncEnabled;
   }
 
   Future<void> _saveSettings() async {
-    await _settingsFile.writeAsString(jsonEncode({'sync_enabled': _syncEnabled}));
+    await _settingsFile.writeAsString(
+        jsonEncode({'sync_enabled': _syncEnabled, 'sync_port': _syncPort}));
   }
 
   // --- данные (делегируем в repo + уведомляем UI) ---
@@ -460,7 +466,14 @@ class AppService extends ChangeNotifier {
     oplog.changeListener = () {
       _engine?.pushAll();
     };
-    await _engine!.serve();
+    await _engine!.serve(port: _syncPort);
+    final bound = _engine!.port;
+    if (bound != null && bound != _syncPort) {
+      // порт закрепился за нами (первый запуск или прежний оказался занят) — запоминаем:
+      // иначе сохранённый у десктопа адрес устаревал бы на каждом старте приложения
+      _syncPort = bound;
+      await _saveSettings();
+    }
     debugPrint('SYNC start: port=${_engine!.port} '
         'peerAddrs=${_peerAddrs.length} peers=${(await peers.list()).length}');
     _discovery = Discovery(identity, _engine!.port!,
